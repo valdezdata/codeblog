@@ -1,0 +1,388 @@
+# What Statistics Never Told You About Ratings
+
+***https://valdezdata.com/what-statistics-never-told-you-about-ratings-72c0f8d44d98***
+
+### Intro
+
+*Ideas:*
+
+-   Story of I remembered my old days playing Mario and Pokemon
+-   Detection of which one is better
+    -   How many games?
+    -   Is a sample enough?
+    -   Are ratings really good to rely on?
+-   Use Python and R to figure out
+    -   Are Mario Games and Pokemon Games ratings different on RAWG.IO
+
+### Body
+
+*Ideas:*
+
+-   Data set how to get it
+-   Using Statistics or ML? Difference? (For the scope of this article...)
+-   Hypothesis Testing
+
+### Conclusion
+
+*Ideas:*
+
+-   How statistics might save you from reviews
+-   Probability theory is hard
+-   Can apply this to anything? (Hypothesis testing)
+
+## Introduction
+
+On the past few days I've been playing Mario Bros, specifically, Super Mario 64. That was a really good game in the 90's, but nowadays it could be seen like a relic for gamer people.
+
+Anyway, while I was playing, I remembered my old days where I used to play not only Super Mario 64, but also Pokemon from Game Boy Color, and all of a sudden, I asked myself a question: Are Mario Games better or worse than Pokemon Games for gamer communities?
+
+It was a question that stayed in my head until I really decided to know if there was a significant difference between Mario and Pokemon.
+
+Actually, at a first glance it could be subjective to ask anyone if a game is better than another because you could attach memories or feelings when referring to a game.
+
+Fortunately, nowadays we have tons of data and we are able to give a shot to solve this question with ratings.
+
+How much data we need in order to solve our current issue? Is a sample enough to detect if a game is better than another one? And last but not least, are ratings a good measure to rely on?
+
+My first guess is that Mario Bros would be considered better than Pokemon just because it's older and because I'm biased.
+
+For this article, I will use Python and R (Yes, both...I'm not concerned by using the best of both worlds) to figure out if Mario or Pokemon is rated higher using the API from [RAWG.io](https://rawg.io/)
+
+## Body
+
+RAWG is one of the largest video games database and, as far as I know, is used by gaming communities to discuss about games.
+
+Thankfully, RAWG has a giant Video Games Database API, and I quote from their website: "And we are gladly sharing our 500,000+ games, search, and machine learning recommendations with the world. Learn what the RAWG games database API can do and build something cool with it!"
+
+So, first, I need to load the packages and load my API key:
+
+### 1.0 Packages and API
+
+```{python RAWG API}
+# Import libraries
+import os
+import requests
+import pandas as pd
+import time
+import json
+from dotenv import load_dotenv
+
+load_dotenv() # take environment variables from .env
+
+# API from dot env
+API_KEY = os.getenv("API_KEY")
+```
+
+In case you are wondering how and where to get your API key from RAWG, [click here](https://rawg.io/apidocs).
+
+After loading your libraries and API key, I have to test if everything was working correctly:
+
+```{python}
+url = f"https://api.rawg.io/api/games?key={API_KEY}&search=mario"
+df = requests.get(url).json() # Grab data
+```
+
+If you print out the data, you will get it in an ugly format, but luckily, there are ways to see information prettier. Because I'm using Rstudio as an IDE for my data analysis, I'm able to see how the request data is shown.
+
+IMAGE DF JSON
+
+As you can see, there's a list called "results", where you can obtain data like id, name, platforms, genres, etc.
+
+IMAGE RESULTS JSON
+
+How you can access to a specific information? With json data, you must pay attention to the keys in order to navigate and parse through the data. For example, if you want to obtain the background image:
+
+```{python}
+df["results"][0]["background_image"]
+```
+
+IMAGE FIRST IMAGE MARIO
+
+So with that in mind, I need to create a for loop of the data that I need. Let's test if a simple loop is working correctly:
+
+```{python}
+for game in df["results"]:
+  
+  game_slug = game["slug"]
+  game_released = game["released"]
+  game_rating = game["rating"]
+  
+  print(game_slug, game_released, game_rating)
+```
+
+IMAGE FIRST FOR LOOP
+
+Everything is working as expected. Once I've tested enough, I was able to create a function for grabbing all the data which basically:
+
+-   Keeps looking for data (page 1, 2 and so on) until there's no data left
+
+-   Stores the data into a pandas data frame
+
+-   Grabs a "sample" by indicating the title of the game and creator(s)
+
+### 2.0 API Call
+
+```{python functionDataFrameOuptut}
+# Function for game details (Second API call inside loop)
+def get_game_details(game_id):
+  
+  # URL and request
+  detail_url = f"https://api.rawg.io/api/games/{game_id}?key={API_KEY}"
+  r = requests.get(detail_url).json()
+  
+  # Variables
+  playtime = r["playtime"]
+  description = r["description"]
+  updated = r["updated"]
+  
+  return playtime, description, updated
+
+
+# =========================
+# Main Function
+# =========================
+def get_games(game_data, creator, title_game):
+
+  # Make RAWG API call & storing game info
+  url = f"https://api.rawg.io/api/games?key={API_KEY}&creators={creator}&search={title_game}&ordering=released"
+  df = requests.get(url).json() # Grab data
+  time.sleep(1) # Just a sec 
+  game_info = df["results"]
+  
+  
+  # Reach until last page
+  while df["next"]:
+    df = requests.get(df["next"]).json()
+    time.sleep(1) # Just a sec
+    game_info.extend(df["results"])
+  
+  # Data For Loop
+  for game in game_info:
+    
+    # Basic data
+    game_id = game["id"]
+    slug = game["slug"]
+    released = game["released"]
+    image = game["background_image"]
+    rating = game["rating"]
+    rating_top = game["rating_top"]
+    ratings_count = game["ratings_count"]
+    
+    # Details per game (second function)
+    playtime, description, updated = get_game_details(game_id)
+    
+    # Save data in pandas data frame
+    game_data = game_data.append({
+    "game_id":game_id,
+    "slug":slug,
+    "released":released,
+    "image":image,
+    "rating":rating,
+    "rating_top":rating_top,
+    "ratings_count":ratings_count,
+    "playtime":playtime,
+    "description":description,
+    "updated":updated
+    }, ignore_index=True
+    )
+
+  return game_data
+
+# =========================
+# Storing Data frame
+# =========================
+
+# Build our data frame
+game_data = pd.DataFrame(
+  columns = ["game_id", "slug", "released", "image", "rating",
+  "rating_top", "ratings_count", "playtime","description", "updated"]
+  )
+
+# Call function
+game_data_mario = 
+  get_games(game_data,
+            "shigeru-miyamoto,hideki-konno,shinji-hatano",
+            "mario")
+            
+game_data_pokemon = 
+  get_games(game_data,
+            "shigeru-miyamoto,junichi-masuda,hitoshi-yamagami",
+            "pokemon")
+```
+
+For the scope of this article, I did a quick research on Google to look which creators where the most involved in Mario and Pokemon games and took that as a "sample" data.
+
+IMAGE MARIO VS PIKACHU
+
+Now I finally have the data, so the next step is to merge both data sets and I decided to use R for this and for the rest of this article.
+
+## 3.0 R Libraries and Store
+
+```{r reticulate}
+library(tidyverse)
+library(reticulate)
+library(flextable)
+library(infer)
+
+# Write Mario data
+py$game_data_mario |> 
+  as_tibble() |> 
+  janitor::clean_names() |> 
+  write_rds("00_articles/rawg_reviews/mario_data.rds")
+
+# Write Pokemon data
+py$game_data_pokemon |> 
+  as_tibble() |> 
+  janitor::clean_names() |> 
+  write_rds("00_articles/rawg_reviews/pokemon_data.rds")
+
+
+# Read rds files
+mario_data <- read_rds("00_articles/rawg_reviews/mario_data.rds")
+pokemon_data <- read_rds("00_articles/rawg_reviews/pokemon_data.rds")
+```
+
+NOTE: For the article, you have to indicate here the libraries and skip the code from above
+
+```{r Union}
+# Bind data set
+df <- mario_data |>
+  mutate(title_game = "Mario") |> # Mario data
+  mutate(
+    across(
+      where(is.list),
+      function(x) ifelse(x == "NULL", NA, x) |> unlist(x)
+    )
+  ) |> 
+  # Union all
+  bind_rows(
+    pokemon_data |> 
+      mutate(title_game = "Pokemon") |> # Pokemon data
+      mutate(
+        across(
+          where(is.list),
+          function(x) ifelse(x == "NULL", NA, x) |> unlist(x)
+          )
+        )
+    )
+```
+
+Skip this as well:
+
+```{r dlookr}
+# Diagnose
+dlookr::diagnose(df) |> flextable()
+dlookr::diagnose_web_report(df)
+
+# Explore
+dlookr::describe(df) |> flextable()
+dlookr::eda_web_report(df)
+```
+
+IMAGE MERGED DATA
+
+## 4.0 Hypothesis Testing
+
+Before diving into solving the current question, you might be wondering why I decided to use statistics instead of machine learning. Why not using a fancy decision tree algorithm instead of going with college concepts?
+
+The key distinction between machine learning and statistics is that machine learning is based in facts, whereas statistics creates inference based on assumptions such as normality.
+
+To put it another way, machine learning is concerned with utilizing mathematical models to get a general knowledge of the data in order to make predictions, whereas statistics is concerned with creating a representation of the data and then doing analysis to uncover insights.
+
+![](images/math.jpeg)
+
+For this occasion, I will use Hypothesis Testing, because the current question from our data is if Mario games are rated higher than Pokemon games.
+
+What we have to keep in mind is if Mario is significantly better or worse than Pokemon.
+
+Hypothesis Testing, also known as Statistical Hypothesis Testing, is a technique for comparing two data sets. Because it's a statistical inference approach, you'll draw a conclusion about what you are comparing.
+
+Ok back to our question. Is there any reason to suppose that the mean rating for Mario games differs significantly from the mean rating for Pokemon games?
+
+```{r EDA}
+ggplot(data = df, aes(x = title_game, y = rating)) +
+  geom_boxplot() +
+  labs(y = "Game Rating")
+
+df |> 
+  group_by(title_game) |> 
+  summarise(n = n(),
+            mean_rating = mean(rating, na.rm = TRUE),
+            std_dev = sd(rating, na.rm = TRUE))
+```
+
+IMAGE BOX PLOT
+
+IMAGE BOX PLOT DATA
+
+As a result, the difference in average ratings is 3.70 - 2.86 = 0.84. As a result, Mario games appear to have a 0.84-star advantage. But, more importantly, are these findings indicative of a real difference across all Mario and Pokemon games? Is it possible that this discrepancy is due to random sample variation?
+
+Note that the box-plot for Pokemon is so much bigger than Mario's, and the reason is because there are Pokemon games with 0 rating values.
+
+Next, I will generate 1,000 repetitions of the data to test the independence by "shuffling" and by assuming the null hypothesis that both Mario and Pokemon games on average have the same ratings on RAWG.
+
+In case you are wondering why "shuffling" let me explain a little bit.
+
+IMAGE SHUFFLE
+
+Just imagine a world where there's no difference in ratings between Mario and Pokemon games. Ratings would be irrelevant, right? in case I shuffle the data, then there wouldn't be no consequence at all.
+
+What I'm trying to do is to shuffle randomly the data because I want to test in our hypothesis of no difference between ratings.
+
+With this in mind, I'll have 1,000 replicated "shuffles" to compute the proper summary statistic for these 1,000 repeated shuffles, given the null hypothesis that both Mario and Pokemon games on average have the same RAWG ratings.
+
+Because the difference in population means is the unknown population parameter of interest, the test statistic of relevance here is the difference in sample means.
+
+```{r hypothesisPlot}
+df |> 
+  specify(formula = rating ~ title_game) |> 
+  hypothesise(null = "independence") |> 
+  generate(reps = 1000, type = "permute") |> 
+  calculate(stat = "diff in means", order = c("Mario", "Pokemon")) |> 
+  visualize(bins = 10) +
+  shade_p_value(obs_stat = 0.84, direction = "both")
+```
+
+IMAGE NULL HYPOTHESIS
+
+Let's go through the plot's aspects one by one. The null distribution is represented by the histogram. Second, the solid line represents the observed test statistic, or the sample mean difference. Third, the p-value is formed by the two shaded sections of the histogram, which is the chance of getting a test statistic that is as extreme as or more extreme than the observed test statistic if the null hypothesis is true.
+
+What is the numerical value of the p-value? To compute this value, we utilize the `get_p_value()` function:
+
+```{r hypothesisValue}
+
+set.seed(1235) # For reproducibility
+
+df |> 
+  specify(formula = rating ~ title_game) |> 
+  hypothesise(null = "independence") |> 
+  generate(reps = 1000, type = "permute") |> 
+  calculate(stat = "diff in means", order = c("Mario", "Pokemon")) |> 
+  get_p_value(obs_stat = 0.84, direction = "both")
+```
+
+IMAGE P VALUE
+
+The p-value of 0.012 is small. In other words, in a hypothetical universe where there was no difference in ratings, there is a very little possibility that we would see a difference of 3.70 - 2.86 = 0.84.
+
+As a result, we may conclude that a difference exists in Mario and Pokemon game ratings, on average, for all RAWG.io
+
+Wait a second, do we really can say there's a difference?
+
+I hope you would've been able to detect the mistake, but the first thing you have to do for a hypothesis testing is to know what distribution follows your data.
+
+In addition, are we sure which statistical test to use? I stumbled upon this [superb article](https://towardsdatascience.com/hypothesis-testing-in-real-life-47f42420b1f7) from Carolina Bento that explains everything.Conclusion
+
+## Conclusion
+
+In the end of the day, probability and statistics is not so easy to interpret. There are a lot of heuristics and biases, and most importantly, we do not have a tangible feedback.
+
+If you are driving, or learning to drive, you know that if you turn to the right, the car will do it as well. Sooner or later, you will understand and your self machine learning (a.k.a your brain) will learn how to do it.
+
+Unfortunately, for environment where we have a lot of uncertainty, the output is different most of the times, and us, as humans, we give a lot of energy and it turns out our energy is a limited resource.
+
+The reason of why I'm mentioning this is because statistics might show you a different thing, while your brain shows you another thing. Think about it, you go to an eCommerce website and see a couple of reviews, and without data you could infer which product is good or not.
+
+Statistics could help you, but it is not always the solution. By the law of large numbers, with more data you will be more certain about what you are dealing with.
+
+In conclusion, if you want to be more objective in ratings, give a shot to statistics and hypothesis testing, but if you don't care, just go with the game you love and be biased.
